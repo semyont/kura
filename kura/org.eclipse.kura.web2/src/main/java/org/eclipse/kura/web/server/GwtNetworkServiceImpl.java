@@ -19,7 +19,6 @@ import java.util.Collection;
 import java.util.EnumSet;
 import java.util.Iterator;
 import java.util.List;
-import java.util.Map;
 
 import org.eclipse.kura.KuraErrorCode;
 import org.eclipse.kura.KuraException;
@@ -1006,12 +1005,9 @@ public class GwtNetworkServiceImpl extends OsgiRemoteServiceServlet implements G
         List<GwtWifiHotspotEntry> gwtWifiHotspotsEntries = new ArrayList<GwtWifiHotspotEntry>();
 
         try {
-            Map<String, WifiHotspotInfo> wifiHotspotInfoMap = nas.getWifiHotspots(interfaceName);
-            if (wifiHotspotInfoMap != null && !wifiHotspotInfoMap.isEmpty()) {
-                Collection<WifiHotspotInfo> wifiHotspotInfoCollection = wifiHotspotInfoMap.values();
-                Iterator<WifiHotspotInfo> it = wifiHotspotInfoCollection.iterator();
-                while (it.hasNext()) {
-                    WifiHotspotInfo wifiHotspotInfo = it.next();
+            List<WifiHotspotInfo> wifiHotspotInfoList = nas.getWifiHotspotList(interfaceName);
+            if (wifiHotspotInfoList != null && !wifiHotspotInfoList.isEmpty()) {
+                for (WifiHotspotInfo wifiHotspotInfo : wifiHotspotInfoList) {
                     String ssid = GwtSafeHtmlUtils.htmlEscape(wifiHotspotInfo.getSsid());
                     // if(!ssid.matches("[0-9A-Za-z/.@*#:\\ \\_\\-]+")){
                     // ssid= null;
