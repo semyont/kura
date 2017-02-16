@@ -1403,6 +1403,13 @@ public class NetworkAdminServiceImpl implements NetworkAdminService, EventHandle
                     // continue;
                     // }
 
+                    int frequency = (int) wap.getFrequency();
+                    int channel = frequencyMhz2Channel(frequency);
+
+                    if (isHotspotInList(channel, wap.getSSID(), wifiHotspotInfoList)) {
+                        continue;
+                    }
+
                     s_logger.trace("getWifiHotspots() :: SSID={}", wap.getSSID());
                     s_logger.trace("getWifiHotspots() :: Signal={}", wap.getStrength());
                     s_logger.trace("getWifiHotspots() :: Frequency={}", wap.getFrequency());
@@ -1452,9 +1459,6 @@ public class NetworkAdminServiceImpl implements NetworkAdminService, EventHandle
                             }
                         }
                     }
-
-                    int frequency = (int) wap.getFrequency();
-                    int channel = frequencyMhz2Channel(frequency);
 
                     EnumSet<WifiSecurity> pairCiphers = EnumSet.noneOf(WifiSecurity.class);
                     EnumSet<WifiSecurity> groupCiphers = EnumSet.noneOf(WifiSecurity.class);
@@ -1525,6 +1529,17 @@ public class NetworkAdminServiceImpl implements NetworkAdminService, EventHandle
         }
 
         return wifiHotspotInfoList;
+    }
+
+    private boolean isHotspotInList(int channel, String ssid, List<WifiHotspotInfo> wifiHotspotInfoList) {
+        boolean found = false;
+        for (WifiHotspotInfo whi : wifiHotspotInfoList) {
+            if (ssid.equals(whi.getSsid()) && channel == whi.getChannel()) {
+                found = true;
+                break;
+            }
+        }
+        return found;
     }
 
     @Override
