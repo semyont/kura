@@ -972,8 +972,8 @@ public class NetworkAdminServiceImpl implements NetworkAdminService, EventHandle
                 }
             }
 
-            if (!LinuxNetworkUtil.hasAddress(interfaceName) || ((type == NetInterfaceType.WIFI)
-                    && (wifiInterfaceState != null) && !wifiInterfaceState.isLinkUp())) {
+            if (!LinuxNetworkUtil.hasAddress(interfaceName)
+                    || type == NetInterfaceType.WIFI && wifiInterfaceState != null && !wifiInterfaceState.isLinkUp()) {
 
                 s_logger.info("bringing interface {} up", interfaceName);
 
@@ -1184,34 +1184,10 @@ public class NetworkAdminServiceImpl implements NetworkAdminService, EventHandle
     @Override
     public Map<String, WifiHotspotInfo> getWifiHotspots(String ifaceName) throws KuraException {
         Map<String, WifiHotspotInfo> mWifiHotspotInfo = new HashMap<String, WifiHotspotInfo>();
-        WifiMode wifiMode = WifiMode.UNKNOWN;
-        List<? extends NetInterfaceConfig<? extends NetInterfaceAddressConfig>> netInterfaceConfigs = getNetworkInterfaceConfigs();
-        for (NetInterfaceConfig<? extends NetInterfaceAddressConfig> netInterfaceConfig : netInterfaceConfigs) {
-            if (netInterfaceConfig.getName().equals(ifaceName)) {
-                List<? extends NetInterfaceAddressConfig> netInterfaceAddresses = netInterfaceConfig
-                        .getNetInterfaceAddresses();
-                if (netInterfaceAddresses != null) {
-                    for (NetInterfaceAddressConfig netInterfaceAddress : netInterfaceAddresses) {
-                        if (netInterfaceAddress instanceof WifiInterfaceAddressConfig) {
-                            wifiMode = ((WifiInterfaceAddressConfig) netInterfaceAddress).getMode();
-                        }
-                    }
-                }
-                break;
-            }
-        }
-
+        WifiMode wifiMode = getWifiMode(ifaceName);
         try {
             if (wifiMode == WifiMode.MASTER) {
-                reloadKernelModule(ifaceName, WifiMode.INFRA);
-                WpaSupplicantConfigWriter wpaSupplicantConfigWriter = WpaSupplicantConfigWriter.getInstance();
-                wpaSupplicantConfigWriter.generateTempWpaSupplicantConf();
-
-                s_logger.debug("getWifiHotspots() :: Starting temporary instance of wpa_supplicant");
-                StringBuilder key = new StringBuilder("net.interface." + ifaceName + ".config.wifi.infra.driver");
-                String driver = KuranetConfig.getProperty(key.toString());
-                WpaSupplicantManager.startTemp(ifaceName, WifiMode.INFRA, driver);
-                wifiModeWait(ifaceName, WifiMode.INFRA, 10);
+                startTemporaryWpaSupplicant(ifaceName);
             }
 
             s_logger.info("getWifiHotspots() :: scanning for available access points ...");
@@ -1219,6 +1195,9 @@ public class NetworkAdminServiceImpl implements NetworkAdminService, EventHandle
             if (scanTool != null) {
                 List<WifiAccessPoint> wifiAccessPoints = scanTool.scan();
                 for (WifiAccessPoint wap : wifiAccessPoints) {
+
+                    int frequency = (int) wap.getFrequency();
+                    int channel = frequencyMhz2Channel(frequency);
 
                     if (wap.getSSID() == null || wap.getSSID().length() == 0) {
                         s_logger.debug("Skipping hidden SSID");
@@ -1234,118 +1213,17 @@ public class NetworkAdminServiceImpl implements NetworkAdminService, EventHandle
                     s_logger.trace("getWifiHotspots() :: Signal={}", wap.getStrength());
                     s_logger.trace("getWifiHotspots() :: Frequency={}", wap.getFrequency());
 
-                    byte[] baMacAddress = wap.getHardwareAddress();
-                    StringBuffer sbMacAddress = new StringBuffer();
-                    for (int i = 0; i < baMacAddress.length; i++) {
-                        sbMacAddress.append(String.format("%02x", baMacAddress[i] & 0x0ff).toUpperCase());
-                        if (i < baMacAddress.length - 1) {
-                            sbMacAddress.append(':');
-                        }
-                    }
-
-                    WifiSecurity wifiSecurity = WifiSecurity.NONE;
-
-                    EnumSet<WifiSecurity> esWpaSecurity = wap.getWpaSecurity();
-                    if (esWpaSecurity != null && !esWpaSecurity.isEmpty()) {
-                        wifiSecurity = WifiSecurity.SECURITY_WPA;
-
-                        Iterator<WifiSecurity> itWpaSecurity = esWpaSecurity.iterator();
-                        while (itWpaSecurity.hasNext()) {
-                            s_logger.trace("getWifiHotspots() :: WPA Security={}", itWpaSecurity.next());
-                        }
-                    }
-
-                    EnumSet<WifiSecurity> esRsnSecurity = wap.getRsnSecurity();
-                    if (esRsnSecurity != null && !esRsnSecurity.isEmpty()) {
-                        if (wifiSecurity == WifiSecurity.SECURITY_WPA) {
-                            wifiSecurity = WifiSecurity.SECURITY_WPA_WPA2;
-                        } else {
-                            wifiSecurity = WifiSecurity.SECURITY_WPA2;
-                        }
-                        Iterator<WifiSecurity> itRsnSecurity = esRsnSecurity.iterator();
-                        while (itRsnSecurity.hasNext()) {
-                            s_logger.trace("getWifiHotspots() :: RSN Security={}", itRsnSecurity.next());
-                        }
-                    }
-
-                    if (wifiSecurity == WifiSecurity.NONE) {
-                        List<String> capabilities = wap.getCapabilities();
-                        if (capabilities != null && !capabilities.isEmpty()) {
-                            for (String capab : capabilities) {
-                                if (capab.equals("Privacy")) {
-                                    wifiSecurity = WifiSecurity.SECURITY_WEP;
-                                    break;
-                                }
-                            }
-                        }
-                    }
-
-                    int frequency = (int) wap.getFrequency();
-                    int channel = frequencyMhz2Channel(frequency);
-
-                    EnumSet<WifiSecurity> pairCiphers = EnumSet.noneOf(WifiSecurity.class);
-                    EnumSet<WifiSecurity> groupCiphers = EnumSet.noneOf(WifiSecurity.class);
-                    if (wifiSecurity == WifiSecurity.SECURITY_WPA_WPA2) {
-                        Iterator<WifiSecurity> itWpaSecurity = esWpaSecurity.iterator();
-                        while (itWpaSecurity.hasNext()) {
-                            WifiSecurity securityEntry = itWpaSecurity.next();
-                            if (securityEntry == WifiSecurity.PAIR_CCMP || securityEntry == WifiSecurity.PAIR_TKIP) {
-                                pairCiphers.add(securityEntry);
-                            } else if (securityEntry == WifiSecurity.GROUP_CCMP
-                                    || securityEntry == WifiSecurity.GROUP_TKIP) {
-                                groupCiphers.add(securityEntry);
-                            }
-                        }
-                        Iterator<WifiSecurity> itRsnSecurity = esRsnSecurity.iterator();
-                        while (itRsnSecurity.hasNext()) {
-                            WifiSecurity securityEntry = itRsnSecurity.next();
-                            if (securityEntry == WifiSecurity.PAIR_CCMP || securityEntry == WifiSecurity.PAIR_TKIP) {
-                                if (!pairCiphers.contains(securityEntry)) {
-                                    pairCiphers.add(securityEntry);
-                                }
-                            } else if (securityEntry == WifiSecurity.GROUP_CCMP
-                                    || securityEntry == WifiSecurity.GROUP_TKIP) {
-                                if (!groupCiphers.contains(securityEntry)) {
-                                    groupCiphers.add(securityEntry);
-                                }
-                            }
-                        }
-                    } else if (wifiSecurity == WifiSecurity.SECURITY_WPA) {
-                        Iterator<WifiSecurity> itWpaSecurity = esWpaSecurity.iterator();
-                        while (itWpaSecurity.hasNext()) {
-                            WifiSecurity securityEntry = itWpaSecurity.next();
-                            if (securityEntry == WifiSecurity.PAIR_CCMP || securityEntry == WifiSecurity.PAIR_TKIP) {
-                                pairCiphers.add(securityEntry);
-                            } else if (securityEntry == WifiSecurity.GROUP_CCMP
-                                    || securityEntry == WifiSecurity.GROUP_TKIP) {
-                                groupCiphers.add(securityEntry);
-                            }
-                        }
-                    } else if (wifiSecurity == WifiSecurity.SECURITY_WPA2) {
-                        Iterator<WifiSecurity> itRsnSecurity = esRsnSecurity.iterator();
-                        while (itRsnSecurity.hasNext()) {
-                            WifiSecurity securityEntry = itRsnSecurity.next();
-                            if (securityEntry == WifiSecurity.PAIR_CCMP || securityEntry == WifiSecurity.PAIR_TKIP) {
-                                pairCiphers.add(securityEntry);
-                            } else if (securityEntry == WifiSecurity.GROUP_CCMP
-                                    || securityEntry == WifiSecurity.GROUP_TKIP) {
-                                groupCiphers.add(securityEntry);
-                            }
-                        }
-                    }
-
+                    StringBuilder sbMacAddress = getMacAddress(wap.getHardwareAddress());
+                    WifiSecurity wifiSecurity = getWifiSecurity(wap);
                     WifiHotspotInfo wifiHotspotInfo = new WifiHotspotInfo(wap.getSSID(), sbMacAddress.toString(),
-                            0 - wap.getStrength(), channel, frequency, wifiSecurity, pairCiphers, groupCiphers);
+                            0 - wap.getStrength(), channel, frequency, wifiSecurity);
+                    setCiphers(wifiHotspotInfo, wap, wifiSecurity);
                     mWifiHotspotInfo.put(wap.getSSID(), wifiHotspotInfo);
                 }
             }
 
             if (wifiMode == WifiMode.MASTER) {
-                if (WpaSupplicantManager.isTempRunning()) {
-                    s_logger.debug("getWifiHotspots() :: stoping temporary instance of wpa_supplicant");
-                    WpaSupplicantManager.stop(ifaceName);
-                }
-                reloadKernelModule(ifaceName, WifiMode.MASTER);
+                stopTemporaryWpaSupplicant(ifaceName);
             }
         } catch (Throwable t) {
             throw new KuraException(KuraErrorCode.INTERNAL_ERROR, t, "scan operation has failed");
@@ -1357,34 +1235,10 @@ public class NetworkAdminServiceImpl implements NetworkAdminService, EventHandle
     @Override
     public List<WifiHotspotInfo> getWifiHotspotList(String ifaceName) throws KuraException {
         List<WifiHotspotInfo> wifiHotspotInfoList = new ArrayList<WifiHotspotInfo>();
-        WifiMode wifiMode = WifiMode.UNKNOWN;
-        List<? extends NetInterfaceConfig<? extends NetInterfaceAddressConfig>> netInterfaceConfigs = getNetworkInterfaceConfigs();
-        for (NetInterfaceConfig<? extends NetInterfaceAddressConfig> netInterfaceConfig : netInterfaceConfigs) {
-            if (netInterfaceConfig.getName().equals(ifaceName)) {
-                List<? extends NetInterfaceAddressConfig> netInterfaceAddresses = netInterfaceConfig
-                        .getNetInterfaceAddresses();
-                if (netInterfaceAddresses != null) {
-                    for (NetInterfaceAddressConfig netInterfaceAddress : netInterfaceAddresses) {
-                        if (netInterfaceAddress instanceof WifiInterfaceAddressConfig) {
-                            wifiMode = ((WifiInterfaceAddressConfig) netInterfaceAddress).getMode();
-                        }
-                    }
-                }
-                break;
-            }
-        }
-
+        WifiMode wifiMode = getWifiMode(ifaceName);
         try {
             if (wifiMode == WifiMode.MASTER) {
-                reloadKernelModule(ifaceName, WifiMode.INFRA);
-                WpaSupplicantConfigWriter wpaSupplicantConfigWriter = WpaSupplicantConfigWriter.getInstance();
-                wpaSupplicantConfigWriter.generateTempWpaSupplicantConf();
-
-                s_logger.debug("getWifiHotspots() :: Starting temporary instance of wpa_supplicant");
-                StringBuilder key = new StringBuilder("net.interface." + ifaceName + ".config.wifi.infra.driver");
-                String driver = KuranetConfig.getProperty(key.toString());
-                WpaSupplicantManager.startTemp(ifaceName, WifiMode.INFRA, driver);
-                wifiModeWait(ifaceName, WifiMode.INFRA, 10);
+                startTemporaryWpaSupplicant(ifaceName);
             }
 
             s_logger.info("getWifiHotspots() :: scanning for available access points ...");
@@ -1393,7 +1247,11 @@ public class NetworkAdminServiceImpl implements NetworkAdminService, EventHandle
                 List<WifiAccessPoint> wifiAccessPoints = scanTool.scan();
                 for (WifiAccessPoint wap : wifiAccessPoints) {
 
-                    if (wap.getSSID() == null || wap.getSSID().length() == 0) {
+                    int frequency = (int) wap.getFrequency();
+                    int channel = frequencyMhz2Channel(frequency);
+
+                    if (wap.getSSID() == null || wap.getSSID().length() == 0
+                            || isHotspotInList(channel, wap.getSSID(), wifiHotspotInfoList)) {
                         s_logger.debug("Skipping hidden SSID");
                         continue;
                     }
@@ -1403,143 +1261,27 @@ public class NetworkAdminServiceImpl implements NetworkAdminService, EventHandle
                     // continue;
                     // }
 
-                    int frequency = (int) wap.getFrequency();
-                    int channel = frequencyMhz2Channel(frequency);
-
-                    if (isHotspotInList(channel, wap.getSSID(), wifiHotspotInfoList)) {
-                        continue;
-                    }
-
                     s_logger.trace("getWifiHotspots() :: SSID={}", wap.getSSID());
                     s_logger.trace("getWifiHotspots() :: Signal={}", wap.getStrength());
                     s_logger.trace("getWifiHotspots() :: Frequency={}", wap.getFrequency());
 
-                    byte[] baMacAddress = wap.getHardwareAddress();
-                    StringBuffer sbMacAddress = new StringBuffer();
-                    for (int i = 0; i < baMacAddress.length; i++) {
-                        sbMacAddress.append(String.format("%02x", baMacAddress[i] & 0x0ff).toUpperCase());
-                        if (i < baMacAddress.length - 1) {
-                            sbMacAddress.append(':');
-                        }
-                    }
-
-                    WifiSecurity wifiSecurity = WifiSecurity.NONE;
-
-                    EnumSet<WifiSecurity> esWpaSecurity = wap.getWpaSecurity();
-                    if (esWpaSecurity != null && !esWpaSecurity.isEmpty()) {
-                        wifiSecurity = WifiSecurity.SECURITY_WPA;
-
-                        Iterator<WifiSecurity> itWpaSecurity = esWpaSecurity.iterator();
-                        while (itWpaSecurity.hasNext()) {
-                            s_logger.trace("getWifiHotspots() :: WPA Security={}", itWpaSecurity.next());
-                        }
-                    }
-
-                    EnumSet<WifiSecurity> esRsnSecurity = wap.getRsnSecurity();
-                    if (esRsnSecurity != null && !esRsnSecurity.isEmpty()) {
-                        if (wifiSecurity == WifiSecurity.SECURITY_WPA) {
-                            wifiSecurity = WifiSecurity.SECURITY_WPA_WPA2;
-                        } else {
-                            wifiSecurity = WifiSecurity.SECURITY_WPA2;
-                        }
-                        Iterator<WifiSecurity> itRsnSecurity = esRsnSecurity.iterator();
-                        while (itRsnSecurity.hasNext()) {
-                            s_logger.trace("getWifiHotspots() :: RSN Security={}", itRsnSecurity.next());
-                        }
-                    }
-
-                    if (wifiSecurity == WifiSecurity.NONE) {
-                        List<String> capabilities = wap.getCapabilities();
-                        if (capabilities != null && !capabilities.isEmpty()) {
-                            for (String capab : capabilities) {
-                                if (capab.equals("Privacy")) {
-                                    wifiSecurity = WifiSecurity.SECURITY_WEP;
-                                    break;
-                                }
-                            }
-                        }
-                    }
-
-                    EnumSet<WifiSecurity> pairCiphers = EnumSet.noneOf(WifiSecurity.class);
-                    EnumSet<WifiSecurity> groupCiphers = EnumSet.noneOf(WifiSecurity.class);
-                    if (wifiSecurity == WifiSecurity.SECURITY_WPA_WPA2) {
-                        Iterator<WifiSecurity> itWpaSecurity = esWpaSecurity.iterator();
-                        while (itWpaSecurity.hasNext()) {
-                            WifiSecurity securityEntry = itWpaSecurity.next();
-                            if (securityEntry == WifiSecurity.PAIR_CCMP || securityEntry == WifiSecurity.PAIR_TKIP) {
-                                pairCiphers.add(securityEntry);
-                            } else if (securityEntry == WifiSecurity.GROUP_CCMP
-                                    || securityEntry == WifiSecurity.GROUP_TKIP) {
-                                groupCiphers.add(securityEntry);
-                            }
-                        }
-                        Iterator<WifiSecurity> itRsnSecurity = esRsnSecurity.iterator();
-                        while (itRsnSecurity.hasNext()) {
-                            WifiSecurity securityEntry = itRsnSecurity.next();
-                            if (securityEntry == WifiSecurity.PAIR_CCMP || securityEntry == WifiSecurity.PAIR_TKIP) {
-                                if (!pairCiphers.contains(securityEntry)) {
-                                    pairCiphers.add(securityEntry);
-                                }
-                            } else if (securityEntry == WifiSecurity.GROUP_CCMP
-                                    || securityEntry == WifiSecurity.GROUP_TKIP) {
-                                if (!groupCiphers.contains(securityEntry)) {
-                                    groupCiphers.add(securityEntry);
-                                }
-                            }
-                        }
-                    } else if (wifiSecurity == WifiSecurity.SECURITY_WPA) {
-                        Iterator<WifiSecurity> itWpaSecurity = esWpaSecurity.iterator();
-                        while (itWpaSecurity.hasNext()) {
-                            WifiSecurity securityEntry = itWpaSecurity.next();
-                            if (securityEntry == WifiSecurity.PAIR_CCMP || securityEntry == WifiSecurity.PAIR_TKIP) {
-                                pairCiphers.add(securityEntry);
-                            } else if (securityEntry == WifiSecurity.GROUP_CCMP
-                                    || securityEntry == WifiSecurity.GROUP_TKIP) {
-                                groupCiphers.add(securityEntry);
-                            }
-                        }
-                    } else if (wifiSecurity == WifiSecurity.SECURITY_WPA2) {
-                        Iterator<WifiSecurity> itRsnSecurity = esRsnSecurity.iterator();
-                        while (itRsnSecurity.hasNext()) {
-                            WifiSecurity securityEntry = itRsnSecurity.next();
-                            if (securityEntry == WifiSecurity.PAIR_CCMP || securityEntry == WifiSecurity.PAIR_TKIP) {
-                                pairCiphers.add(securityEntry);
-                            } else if (securityEntry == WifiSecurity.GROUP_CCMP
-                                    || securityEntry == WifiSecurity.GROUP_TKIP) {
-                                groupCiphers.add(securityEntry);
-                            }
-                        }
-                    }
-
+                    StringBuilder sbMacAddress = getMacAddress(wap.getHardwareAddress());
+                    WifiSecurity wifiSecurity = getWifiSecurity(wap);
                     WifiHotspotInfo wifiHotspotInfo = new WifiHotspotInfo(wap.getSSID(), sbMacAddress.toString(),
-                            0 - wap.getStrength(), channel, frequency, wifiSecurity, pairCiphers, groupCiphers);
+                            0 - wap.getStrength(), channel, frequency, wifiSecurity);
+                    setCiphers(wifiHotspotInfo, wap, wifiSecurity);
                     wifiHotspotInfoList.add(wifiHotspotInfo);
                 }
             }
 
             if (wifiMode == WifiMode.MASTER) {
-                if (WpaSupplicantManager.isTempRunning()) {
-                    s_logger.debug("getWifiHotspots() :: stoping temporary instance of wpa_supplicant");
-                    WpaSupplicantManager.stop(ifaceName);
-                }
-                reloadKernelModule(ifaceName, WifiMode.MASTER);
+                stopTemporaryWpaSupplicant(ifaceName);
             }
         } catch (Throwable t) {
             throw new KuraException(KuraErrorCode.INTERNAL_ERROR, t, "scan operation has failed");
         }
 
         return wifiHotspotInfoList;
-    }
-
-    private boolean isHotspotInList(int channel, String ssid, List<WifiHotspotInfo> wifiHotspotInfoList) {
-        boolean found = false;
-        for (WifiHotspotInfo whi : wifiHotspotInfoList) {
-            if (ssid.equals(whi.getSsid()) && channel == whi.getChannel()) {
-                found = true;
-                break;
-            }
-        }
-        return found;
     }
 
     @Override
@@ -1902,10 +1644,168 @@ public class NetworkAdminServiceImpl implements NetworkAdminService, EventHandle
         return (frequency - 2407) / 5;
     }
 
+    private void stopTemporaryWpaSupplicant(String ifaceName) throws KuraException {
+        if (WpaSupplicantManager.isTempRunning()) {
+            s_logger.debug("getWifiHotspots() :: stoping temporary instance of wpa_supplicant");
+            WpaSupplicantManager.stop(ifaceName);
+        }
+        reloadKernelModule(ifaceName, WifiMode.MASTER);
+    }
+
+    private void startTemporaryWpaSupplicant(String ifaceName) throws KuraException {
+        reloadKernelModule(ifaceName, WifiMode.INFRA);
+        WpaSupplicantConfigWriter wpaSupplicantConfigWriter = WpaSupplicantConfigWriter.getInstance();
+        wpaSupplicantConfigWriter.generateTempWpaSupplicantConf();
+
+        s_logger.debug("getWifiHotspots() :: Starting temporary instance of wpa_supplicant");
+        StringBuilder key = new StringBuilder("net.interface." + ifaceName + ".config.wifi.infra.driver");
+        String driver = KuranetConfig.getProperty(key.toString());
+        WpaSupplicantManager.startTemp(ifaceName, WifiMode.INFRA, driver);
+        wifiModeWait(ifaceName, WifiMode.INFRA, 10);
+    }
+
+    private StringBuilder getMacAddress(byte[] baMacAddress) {
+        StringBuilder sbMacAddress = new StringBuilder();
+        for (int i = 0; i < baMacAddress.length; i++) {
+            sbMacAddress.append(String.format("%02x", baMacAddress[i] & 0x0ff).toUpperCase());
+            if (i < baMacAddress.length - 1) {
+                sbMacAddress.append(':');
+            }
+        }
+        return sbMacAddress;
+    }
+
     private void reloadKernelModule(String interfaceName, WifiMode wifiMode) throws KuraException {
         s_logger.info("monitor() :: reload {} using kernel module for WiFi mode {}", interfaceName, wifiMode);
         LinuxNetworkUtil.unloadKernelModule(interfaceName);
         LinuxNetworkUtil.loadKernelModule(interfaceName, wifiMode);
     }
 
+    private boolean isHotspotInList(int channel, String ssid, List<WifiHotspotInfo> wifiHotspotInfoList) {
+        boolean found = false;
+        for (WifiHotspotInfo whi : wifiHotspotInfoList) {
+            if (ssid.equals(whi.getSsid()) && channel == whi.getChannel()) {
+                found = true;
+                break;
+            }
+        }
+        return found;
+    }
+
+    private WifiMode getWifiMode(String ifaceName) throws KuraException {
+        WifiMode wifiMode = WifiMode.UNKNOWN;
+        List<? extends NetInterfaceConfig<? extends NetInterfaceAddressConfig>> netInterfaceConfigs = getNetworkInterfaceConfigs();
+        for (NetInterfaceConfig<? extends NetInterfaceAddressConfig> netInterfaceConfig : netInterfaceConfigs) {
+            if (netInterfaceConfig.getName().equals(ifaceName)) {
+                List<? extends NetInterfaceAddressConfig> netInterfaceAddresses = netInterfaceConfig
+                        .getNetInterfaceAddresses();
+                if (netInterfaceAddresses != null) {
+                    wifiMode = getWifiMode(netInterfaceAddresses);
+                }
+                break;
+            }
+        }
+        return wifiMode;
+    }
+
+    private WifiMode getWifiMode(List<? extends NetInterfaceAddressConfig> netInterfaceAddresses) {
+        WifiMode wifiMode = WifiMode.UNKNOWN;
+        for (NetInterfaceAddressConfig netInterfaceAddress : netInterfaceAddresses) {
+            if (netInterfaceAddress instanceof WifiInterfaceAddressConfig) {
+                wifiMode = ((WifiInterfaceAddressConfig) netInterfaceAddress).getMode();
+            }
+        }
+        return wifiMode;
+    }
+
+    private WifiSecurity getWifiSecurity(WifiAccessPoint wap) {
+        WifiSecurity wifiSecurity = WifiSecurity.NONE;
+
+        EnumSet<WifiSecurity> esWpaSecurity = wap.getWpaSecurity();
+        if (esWpaSecurity != null && !esWpaSecurity.isEmpty()) {
+            wifiSecurity = WifiSecurity.SECURITY_WPA;
+
+            Iterator<WifiSecurity> itWpaSecurity = esWpaSecurity.iterator();
+            while (itWpaSecurity.hasNext()) {
+                s_logger.trace("getWifiHotspots() :: WPA Security={}", itWpaSecurity.next());
+            }
+        }
+
+        EnumSet<WifiSecurity> esRsnSecurity = wap.getRsnSecurity();
+        if (esRsnSecurity != null && !esRsnSecurity.isEmpty()) {
+            if (wifiSecurity == WifiSecurity.SECURITY_WPA) {
+                wifiSecurity = WifiSecurity.SECURITY_WPA_WPA2;
+            } else {
+                wifiSecurity = WifiSecurity.SECURITY_WPA2;
+            }
+            Iterator<WifiSecurity> itRsnSecurity = esRsnSecurity.iterator();
+            while (itRsnSecurity.hasNext()) {
+                s_logger.trace("getWifiHotspots() :: RSN Security={}", itRsnSecurity.next());
+            }
+        }
+
+        if (wifiSecurity == WifiSecurity.NONE) {
+            List<String> capabilities = wap.getCapabilities();
+            if (capabilities != null && !capabilities.isEmpty() && capabilities.contains("Privacy")) {
+                wifiSecurity = WifiSecurity.SECURITY_WEP;
+            }
+        }
+
+        return wifiSecurity;
+
+    }
+
+    private void setCiphers(WifiHotspotInfo wifiHotspotInfo, WifiAccessPoint wap, WifiSecurity wifiSecurity) {
+        EnumSet<WifiSecurity> esWpaSecurity = wap.getWpaSecurity();
+        EnumSet<WifiSecurity> esRsnSecurity = wap.getRsnSecurity();
+        EnumSet<WifiSecurity> pairCiphers = EnumSet.noneOf(WifiSecurity.class);
+        EnumSet<WifiSecurity> groupCiphers = EnumSet.noneOf(WifiSecurity.class);
+        if (wifiSecurity == WifiSecurity.SECURITY_WPA_WPA2) {
+            Iterator<WifiSecurity> itWpaSecurity = esWpaSecurity.iterator();
+            while (itWpaSecurity.hasNext()) {
+                WifiSecurity securityEntry = itWpaSecurity.next();
+                if (securityEntry == WifiSecurity.PAIR_CCMP || securityEntry == WifiSecurity.PAIR_TKIP) {
+                    pairCiphers.add(securityEntry);
+                } else if (securityEntry == WifiSecurity.GROUP_CCMP || securityEntry == WifiSecurity.GROUP_TKIP) {
+                    groupCiphers.add(securityEntry);
+                }
+            }
+            Iterator<WifiSecurity> itRsnSecurity = esRsnSecurity.iterator();
+            while (itRsnSecurity.hasNext()) {
+                WifiSecurity securityEntry = itRsnSecurity.next();
+                if (securityEntry == WifiSecurity.PAIR_CCMP || securityEntry == WifiSecurity.PAIR_TKIP) {
+                    if (!pairCiphers.contains(securityEntry)) {
+                        pairCiphers.add(securityEntry);
+                    }
+                } else if (securityEntry == WifiSecurity.GROUP_CCMP || securityEntry == WifiSecurity.GROUP_TKIP) {
+                    if (!groupCiphers.contains(securityEntry)) {
+                        groupCiphers.add(securityEntry);
+                    }
+                }
+            }
+        } else if (wifiSecurity == WifiSecurity.SECURITY_WPA) {
+            Iterator<WifiSecurity> itWpaSecurity = esWpaSecurity.iterator();
+            while (itWpaSecurity.hasNext()) {
+                WifiSecurity securityEntry = itWpaSecurity.next();
+                if (securityEntry == WifiSecurity.PAIR_CCMP || securityEntry == WifiSecurity.PAIR_TKIP) {
+                    pairCiphers.add(securityEntry);
+                } else if (securityEntry == WifiSecurity.GROUP_CCMP || securityEntry == WifiSecurity.GROUP_TKIP) {
+                    groupCiphers.add(securityEntry);
+                }
+            }
+        } else if (wifiSecurity == WifiSecurity.SECURITY_WPA2) {
+            Iterator<WifiSecurity> itRsnSecurity = esRsnSecurity.iterator();
+            while (itRsnSecurity.hasNext()) {
+                WifiSecurity securityEntry = itRsnSecurity.next();
+                if (securityEntry == WifiSecurity.PAIR_CCMP || securityEntry == WifiSecurity.PAIR_TKIP) {
+                    pairCiphers.add(securityEntry);
+                } else if (securityEntry == WifiSecurity.GROUP_CCMP || securityEntry == WifiSecurity.GROUP_TKIP) {
+                    groupCiphers.add(securityEntry);
+                }
+            }
+        }
+
+        wifiHotspotInfo.setGroupCiphers(groupCiphers);
+        wifiHotspotInfo.setPairCiphers(pairCiphers);
+    }
 }
