@@ -996,8 +996,8 @@ public class GwtNetworkServiceImpl extends OsgiRemoteServiceServlet implements G
     }
 
     @Override
-    public ArrayList<GwtWifiHotspotEntry> findWifiHotspots(GwtXSRFToken xsrfToken, String interfaceName)
-            throws GwtKuraException {
+    public ArrayList<GwtWifiHotspotEntry> findWifiHotspots(GwtXSRFToken xsrfToken, String interfaceName,
+            String wirelessSsid) throws GwtKuraException {
 
         checkXSRFToken(xsrfToken);
         NetworkAdminService nas = ServiceLocator.getInstance().getService(NetworkAdminService.class);
@@ -1012,7 +1012,8 @@ public class GwtNetworkServiceImpl extends OsgiRemoteServiceServlet implements G
                     // if(!ssid.matches("[0-9A-Za-z/.@*#:\\ \\_\\-]+")){
                     // ssid= null;
                     // }
-                    if (wifiHotspotInfo.getChannel() <= systemService.getKuraWifiTopChannel() && ssid != null) {
+                    if (wifiHotspotInfo.getChannel() <= systemService.getKuraWifiTopChannel() && ssid != null
+                            && !ssid.equals(wirelessSsid)) {
                         GwtWifiHotspotEntry gwtWifiHotspotEntry = new GwtWifiHotspotEntry();
                         gwtWifiHotspotEntry.setMacAddress(wifiHotspotInfo.getMacAddress());
                         gwtWifiHotspotEntry.setSSID(ssid);
