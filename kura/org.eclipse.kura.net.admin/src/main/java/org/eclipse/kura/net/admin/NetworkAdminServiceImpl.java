@@ -20,12 +20,12 @@ import java.nio.channels.FileChannel;
 import java.util.ArrayList;
 import java.util.Dictionary;
 import java.util.EnumSet;
-import java.util.HashMap;
 import java.util.Hashtable;
 import java.util.Iterator;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 import org.eclipse.kura.KuraErrorCode;
 import org.eclipse.kura.KuraException;
@@ -176,7 +176,7 @@ public class NetworkAdminServiceImpl implements NetworkAdminService, EventHandle
             s_logger.warn("Exception while activating NetworkAdmin Service!", e);
         }
 
-        Dictionary<String, String[]> d = new Hashtable<String, String[]>();
+        Dictionary<String, String[]> d = new Hashtable<>();
         d.put(EventConstants.EVENT_TOPIC, EVENT_TOPICS);
         this.m_ctx.getBundleContext().registerService(EventHandler.class.getName(), this, d);
         s_logger.debug("Done Activating NetworkAdmin Service...");
@@ -202,7 +202,7 @@ public class NetworkAdminServiceImpl implements NetworkAdminService, EventHandle
     @Override
     public List<NetConfig> getNetworkInterfaceConfigs(String interfaceName) throws KuraException {
 
-        ArrayList<NetConfig> netConfigs = new ArrayList<NetConfig>();
+        ArrayList<NetConfig> netConfigs = new ArrayList<>();
         NetworkConfiguration networkConfig = this.m_networkConfigurationService.getNetworkConfiguration();
         if (interfaceName != null && networkConfig != null) {
             try {
@@ -269,7 +269,7 @@ public class NetworkAdminServiceImpl implements NetworkAdminService, EventHandle
                     "Either IPv4 or IPv6 configuration must be defined");
         }
 
-        List<String> modifiedInterfaceNames = new ArrayList<String>();
+        List<String> modifiedInterfaceNames = new ArrayList<>();
         boolean configurationChanged = false;
 
         ComponentConfiguration originalNetworkComponentConfiguration = ((SelfConfiguringComponent) this.m_networkConfigurationService)
@@ -313,7 +313,7 @@ public class NetworkAdminServiceImpl implements NetworkAdminService, EventHandle
                     if (netInterfaceAddressConfigs != null && !netInterfaceAddressConfigs.isEmpty()) {
                         for (NetInterfaceAddressConfig netInterfaceAddressConfig : netInterfaceAddressConfigs) {
                             List<NetConfig> existingNetConfigs = netInterfaceAddressConfig.getConfigs();
-                            List<NetConfig> newNetConfigs = new ArrayList<NetConfig>();
+                            List<NetConfig> newNetConfigs = new ArrayList<>();
                             for (NetConfig netConfig : existingNetConfigs) {
                                 s_logger.debug("looking at existing NetConfig for {} with value: {}", interfaceName,
                                         netConfig);
@@ -514,7 +514,7 @@ public class NetworkAdminServiceImpl implements NetworkAdminService, EventHandle
                     "WiFi configuration must be defined");
         }
 
-        List<String> modifiedInterfaceNames = new ArrayList<String>();
+        List<String> modifiedInterfaceNames = new ArrayList<>();
         boolean configurationChanged = false;
 
         ComponentConfiguration originalNetworkComponentConfiguration = ((SelfConfiguringComponent) this.m_networkConfigurationService)
@@ -536,7 +536,7 @@ public class NetworkAdminServiceImpl implements NetworkAdminService, EventHandle
                     if (netInterfaceAddressConfigs != null && !netInterfaceAddressConfigs.isEmpty()) {
                         for (NetInterfaceAddressConfig netInterfaceAddressConfig : netInterfaceAddressConfigs) {
                             List<NetConfig> existingNetConfigs = netInterfaceAddressConfig.getConfigs();
-                            List<NetConfig> newNetConfigs = new ArrayList<NetConfig>();
+                            List<NetConfig> newNetConfigs = new ArrayList<>();
                             WifiMode newWifiMode = wifiConfig != null ? wifiConfig.getMode() : null;
                             for (NetConfig netConfig : existingNetConfigs) {
                                 s_logger.debug("looking at existing NetConfig for {} with value: {}", interfaceName,
@@ -766,7 +766,7 @@ public class NetworkAdminServiceImpl implements NetworkAdminService, EventHandle
                     "Modem configuration must be defined");
         }
 
-        List<String> modifiedInterfaceNames = new ArrayList<String>();
+        List<String> modifiedInterfaceNames = new ArrayList<>();
         boolean configurationChanged = false;
 
         ComponentConfiguration originalNetworkComponentConfiguration = ((SelfConfiguringComponent) this.m_networkConfigurationService)
@@ -825,7 +825,7 @@ public class NetworkAdminServiceImpl implements NetworkAdminService, EventHandle
                     if (netInterfaceAddressConfigs != null && !netInterfaceAddressConfigs.isEmpty()) {
                         for (NetInterfaceAddressConfig netInterfaceAddressConfig : netInterfaceAddressConfigs) {
                             List<NetConfig> existingNetConfigs = netInterfaceAddressConfig.getConfigs();
-                            List<NetConfig> newNetConfigs = new ArrayList<NetConfig>();
+                            List<NetConfig> newNetConfigs = new ArrayList<>();
                             for (NetConfig netConfig : existingNetConfigs) {
                                 s_logger.debug("looking at existing NetConfig for {} with value: {}", interfaceName,
                                         netConfig);
@@ -1016,7 +1016,7 @@ public class NetworkAdminServiceImpl implements NetworkAdminService, EventHandle
             throws KuraException {
         List<? extends NetInterfaceConfig<? extends NetInterfaceAddressConfig>> netInterfaceConfigs = getNetworkInterfaceConfigs();
 
-        List<NetInterfaceConfig<? extends NetInterfaceAddressConfig>> wifiNetInterfaceConfigs = new ArrayList<NetInterfaceConfig<? extends NetInterfaceAddressConfig>>();
+        List<NetInterfaceConfig<? extends NetInterfaceAddressConfig>> wifiNetInterfaceConfigs = new ArrayList<>();
         for (NetInterfaceConfig<? extends NetInterfaceAddressConfig> netInterfaceConfig : netInterfaceConfigs) {
             if (netInterfaceConfig.getType() == NetInterfaceType.WIFI) {
                 wifiNetInterfaceConfigs.add(netInterfaceConfig);
@@ -1131,7 +1131,7 @@ public class NetworkAdminServiceImpl implements NetworkAdminService, EventHandle
                                 for (NetConfig netConfig : existingNetConfigs) {
                                     if (netConfig instanceof FirewallAutoNatConfig) {
                                         if (desiredNatRules == null) {
-                                            desiredNatRules = new LinkedHashSet<NATRule>();
+                                            desiredNatRules = new LinkedHashSet<>();
                                         }
                                         desiredNatRules.add(new NATRule(ifaceName, gatewayIface, true));
                                     }
@@ -1183,58 +1183,13 @@ public class NetworkAdminServiceImpl implements NetworkAdminService, EventHandle
 
     @Override
     public Map<String, WifiHotspotInfo> getWifiHotspots(String ifaceName) throws KuraException {
-        Map<String, WifiHotspotInfo> mWifiHotspotInfo = new HashMap<String, WifiHotspotInfo>();
-        WifiMode wifiMode = getWifiMode(ifaceName);
-        try {
-            if (wifiMode == WifiMode.MASTER) {
-                startTemporaryWpaSupplicant(ifaceName);
-            }
-
-            s_logger.info("getWifiHotspots() :: scanning for available access points ...");
-            IScanTool scanTool = ScanTool.get(ifaceName);
-            if (scanTool != null) {
-                List<WifiAccessPoint> wifiAccessPoints = scanTool.scan();
-                for (WifiAccessPoint wap : wifiAccessPoints) {
-
-                    int frequency = (int) wap.getFrequency();
-                    int channel = frequencyMhz2Channel(frequency);
-
-                    if (wap.getSSID() == null || wap.getSSID().length() == 0) {
-                        s_logger.debug("Skipping hidden SSID");
-                        continue;
-                    }
-
-                    // if (!wap.getSSID().matches(SSID_REGEXP)){
-                    // s_logger.debug("Skipping undesired SSID");
-                    // continue;
-                    // }
-
-                    s_logger.trace("getWifiHotspots() :: SSID={}", wap.getSSID());
-                    s_logger.trace("getWifiHotspots() :: Signal={}", wap.getStrength());
-                    s_logger.trace("getWifiHotspots() :: Frequency={}", wap.getFrequency());
-
-                    StringBuilder sbMacAddress = getMacAddress(wap.getHardwareAddress());
-                    WifiSecurity wifiSecurity = getWifiSecurity(wap);
-                    WifiHotspotInfo wifiHotspotInfo = new WifiHotspotInfo(wap.getSSID(), sbMacAddress.toString(),
-                            0 - wap.getStrength(), channel, frequency, wifiSecurity);
-                    setCiphers(wifiHotspotInfo, wap, wifiSecurity);
-                    mWifiHotspotInfo.put(wap.getSSID(), wifiHotspotInfo);
-                }
-            }
-
-            if (wifiMode == WifiMode.MASTER) {
-                stopTemporaryWpaSupplicant(ifaceName);
-            }
-        } catch (Throwable t) {
-            throw new KuraException(KuraErrorCode.INTERNAL_ERROR, t, "scan operation has failed");
-        }
-
-        return mWifiHotspotInfo;
+        List<WifiHotspotInfo> wifiHotspotInfoList = getWifiHotspotList(ifaceName);
+        return wifiHotspotInfoList.stream().collect(Collectors.toMap(WifiHotspotInfo::getSsid, item -> item));
     }
 
     @Override
     public List<WifiHotspotInfo> getWifiHotspotList(String ifaceName) throws KuraException {
-        List<WifiHotspotInfo> wifiHotspotInfoList = new ArrayList<WifiHotspotInfo>();
+        List<WifiHotspotInfo> wifiHotspotInfoList = new ArrayList<>();
         WifiMode wifiMode = getWifiMode(ifaceName);
         try {
             if (wifiMode == WifiMode.MASTER) {
@@ -1334,7 +1289,7 @@ public class NetworkAdminServiceImpl implements NetworkAdminService, EventHandle
     public boolean rollbackDefaultConfiguration() throws KuraException {
         s_logger.debug("rollbackDefaultConfiguration() :: Recovering default configuration ...");
 
-        ArrayList<NetworkRollbackItem> rollbackItems = new ArrayList<NetworkRollbackItem>();
+        ArrayList<NetworkRollbackItem> rollbackItems = new ArrayList<>();
 
         if (this.m_systemService == null) {
             return false;
