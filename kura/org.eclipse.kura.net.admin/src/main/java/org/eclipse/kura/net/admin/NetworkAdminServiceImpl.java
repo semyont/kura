@@ -1713,6 +1713,7 @@ public class NetworkAdminServiceImpl implements NetworkAdminService, EventHandle
         for (NetInterfaceAddressConfig netInterfaceAddress : netInterfaceAddresses) {
             if (netInterfaceAddress instanceof WifiInterfaceAddressConfig) {
                 wifiMode = ((WifiInterfaceAddressConfig) netInterfaceAddress).getMode();
+                break;
             }
         }
         return wifiMode;
@@ -1756,56 +1757,36 @@ public class NetworkAdminServiceImpl implements NetworkAdminService, EventHandle
     }
 
     private void setCiphers(WifiHotspotInfo wifiHotspotInfo, WifiAccessPoint wap, WifiSecurity wifiSecurity) {
-        EnumSet<WifiSecurity> esWpaSecurity = wap.getWpaSecurity();
-        EnumSet<WifiSecurity> esRsnSecurity = wap.getRsnSecurity();
+        EnumSet<WifiSecurity> esSecurity = null;
         EnumSet<WifiSecurity> pairCiphers = EnumSet.noneOf(WifiSecurity.class);
         EnumSet<WifiSecurity> groupCiphers = EnumSet.noneOf(WifiSecurity.class);
         if (wifiSecurity == WifiSecurity.SECURITY_WPA_WPA2) {
-            Iterator<WifiSecurity> itWpaSecurity = esWpaSecurity.iterator();
-            while (itWpaSecurity.hasNext()) {
-                WifiSecurity securityEntry = itWpaSecurity.next();
-                if (securityEntry == WifiSecurity.PAIR_CCMP || securityEntry == WifiSecurity.PAIR_TKIP) {
-                    pairCiphers.add(securityEntry);
-                } else if (securityEntry == WifiSecurity.GROUP_CCMP || securityEntry == WifiSecurity.GROUP_TKIP) {
-                    groupCiphers.add(securityEntry);
-                }
-            }
-            Iterator<WifiSecurity> itRsnSecurity = esRsnSecurity.iterator();
-            while (itRsnSecurity.hasNext()) {
-                WifiSecurity securityEntry = itRsnSecurity.next();
-                if (securityEntry == WifiSecurity.PAIR_CCMP || securityEntry == WifiSecurity.PAIR_TKIP) {
-                    if (!pairCiphers.contains(securityEntry)) {
-                        pairCiphers.add(securityEntry);
-                    }
-                } else if (securityEntry == WifiSecurity.GROUP_CCMP || securityEntry == WifiSecurity.GROUP_TKIP) {
-                    if (!groupCiphers.contains(securityEntry)) {
-                        groupCiphers.add(securityEntry);
-                    }
-                }
-            }
+            esSecurity = wap.getWpaSecurity();
+            esSecurity.addAll(wap.getRsnSecurity());
         } else if (wifiSecurity == WifiSecurity.SECURITY_WPA) {
-            Iterator<WifiSecurity> itWpaSecurity = esWpaSecurity.iterator();
-            while (itWpaSecurity.hasNext()) {
-                WifiSecurity securityEntry = itWpaSecurity.next();
-                if (securityEntry == WifiSecurity.PAIR_CCMP || securityEntry == WifiSecurity.PAIR_TKIP) {
-                    pairCiphers.add(securityEntry);
-                } else if (securityEntry == WifiSecurity.GROUP_CCMP || securityEntry == WifiSecurity.GROUP_TKIP) {
-                    groupCiphers.add(securityEntry);
-                }
-            }
+            esSecurity = wap.getWpaSecurity();
         } else if (wifiSecurity == WifiSecurity.SECURITY_WPA2) {
-            Iterator<WifiSecurity> itRsnSecurity = esRsnSecurity.iterator();
-            while (itRsnSecurity.hasNext()) {
-                WifiSecurity securityEntry = itRsnSecurity.next();
-                if (securityEntry == WifiSecurity.PAIR_CCMP || securityEntry == WifiSecurity.PAIR_TKIP) {
-                    pairCiphers.add(securityEntry);
-                } else if (securityEntry == WifiSecurity.GROUP_CCMP || securityEntry == WifiSecurity.GROUP_TKIP) {
-                    groupCiphers.add(securityEntry);
-                }
-            }
+            esSecurity = wap.getRsnSecurity();
         }
-
+        if (esSecurity != null) {
+            getCiphers(esSecurity, pairCiphers, groupCiphers);
+        }
         wifiHotspotInfo.setGroupCiphers(groupCiphers);
         wifiHotspotInfo.setPairCiphers(pairCiphers);
+    }
+
+    private void getCiphers(EnumSet<WifiSecurity> esSecurity, EnumSet<WifiSecurity> pairCiphers,
+            EnumSet<WifiSecurity> groupCiphers) {
+        Iterator<WifiSecurity> itRsnSecurity = esSecurity.iterator();
+        while (itRsnSecurity.hasNext()) {
+            WifiSecurity securityEntry = itRsnSecurity.next();
+            if (securityEntry == WifiSecurity.PAIR_CCMP
+                    || securityEntry == WifiSecurity.PAIR_TKIP && !pairCiphers.contains(securityEntry)) {
+                pairCiphers.add(securityEntry);
+            } else if (securityEntry == WifiSecurity.GROUP_CCMP
+                    || securityEntry == WifiSecurity.GROUP_TKIP && !groupCiphers.contains(securityEntry)) {
+                groupCiphers.add(securityEntry);
+            }
+        }
     }
 }

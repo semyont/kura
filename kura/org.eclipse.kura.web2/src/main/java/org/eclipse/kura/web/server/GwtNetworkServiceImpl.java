@@ -1006,7 +1006,7 @@ public class GwtNetworkServiceImpl extends OsgiRemoteServiceServlet implements G
 
         try {
             List<WifiHotspotInfo> wifiHotspotInfoList = nas.getWifiHotspotList(interfaceName);
-            if (wifiHotspotInfoList != null && !wifiHotspotInfoList.isEmpty()) {
+            if (wifiHotspotInfoList != null) {
                 for (WifiHotspotInfo wifiHotspotInfo : wifiHotspotInfoList) {
                     String ssid = GwtSafeHtmlUtils.htmlEscape(wifiHotspotInfo.getSsid());
                     // if(!ssid.matches("[0-9A-Za-z/.@*#:\\ \\_\\-]+")){
